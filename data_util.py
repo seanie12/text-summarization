@@ -1,6 +1,3 @@
-from collections import Counter
-import itertools
-import pickle
 import numpy as np
 
 # EOS and PAD are merged into EOS
@@ -12,51 +9,52 @@ ID_EOS = 0
 ID_GO = 1
 ID_UNK = 2
 
-base_tok2idx = {
-    MARK_GO: ID_GO,
-    MARK_EOS: ID_EOS,
-    MARK_UNK: ID_UNK
-}
-base_idx2tok = {
-    ID_GO: MARK_GO,
-    ID_EOS: MARK_EOS,
-    ID_UNK: MARK_UNK
-}
+
+class Vocab(object):
+    # read vocab file and make word2idx and idx2word
+    def __init__(self, vocab_file, max_size):
+        self._word2idx = dict()
+        self._idx2word = dict()
+        self._count = 0
+
+        for word in MARKS:
+            self._word2idx[word] = self._count
+            self._idx2word[self._count] = word
+            self._count += 1
+
+        with open(vocab_file, 'r', encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                tokens = line.split()
+                if len(tokens) != 2:
+                    continue
+                word = tokens[0]
+                freq = tokens[1]
+                if word in MARKS:
+                    raise Exception
+                if word in self._word2idx:
+                    raise Exception
+                self._word2idx[word] = self._count
+                self._idx2word[self._count] = word
+                self._count += 1
+                if self._count >= max_size:
+                    break
+
+    def word2idx(self, word):
+        if word in self._word2idx:
+            return self._word2idx[word]
+        else:
+            return self._word2idx[MARK_UNK]
+
+    def idx2word(self, word_idx):
+        if word_idx not in self._idx2word:
+            raise Exception
+        return self._idx2word[word_idx]
+
+    def size(self):
+        return self._count
 
 
-def load_dict(file_path):
-    print("load dictionary from :{}".format(file_path))
-    try:
-        f = open(file_path, "rb")
-        tok2idx, idx2tok, decoder_vocab_size = pickle.load(f)
-        return tok2idx, idx2tok, decoder_vocab_size
-    except FileNotFoundError:
-        return None
-
-
-def create_dict(docs, offset, max_words=None):
-    """
-    :param docs: list of tokenized list
-    :param offset: starting index
-    :param max_words: limit of vocab size
-    :return: a tuple of dictionaries (tok2idx, idx2tok)
-    """
-    # flatten 2d list into 1d for word counting
-    docs = list(itertools.chain.from_iterable(docs))
-    counter = Counter(docs)
-    if max_words:
-        words = counter.most_common(max_words)
-    else:
-        words = counter.most_common()
-    words, freq = zip(*words)
-    # words = MARKS + list(words)
-    tok2idx = {word.strip(): offset + i for i, word in enumerate(words)}
-    idx2tok = {idx: tok for (tok, idx) in tok2idx.items()}
-    return tok2idx, idx2tok
-
-
-def load_data(doc_file, sum_file, dict_file,
-              max_doc_vocab=None, max_sum_vocab=None, debug=False):
+def load_data(doc_file, sum_file, vocab_file, max_vocab_size, debug=False):
     print("load data")
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
@@ -69,70 +67,51 @@ def load_data(doc_file, sum_file, dict_file,
     assert len(docs) == len(sums)
     # split document into word level tokens
     docs = list(map(lambda doc: doc.split(), docs))
+    # remove <s> and </s> in summary
+    sums = list(
+        map(lambda summary:
+            summary.replace("<s>", "").replace("</s>", "").strip(), sums))
     sums = list(map(lambda summary: summary.split(), sums))
     # load saved dictionary
-    dicts = load_dict(dict_file)
+    vocab = Vocab(vocab_file, max_vocab_size)
 
-    # create dictionary which map unique token to index
-    if dicts is None:
-        tok2idx, idx2tok = create_dict(sums, offset=len(base_tok2idx))
-        tok2idx.update(base_tok2idx)
-        idx2tok.update(base_idx2tok)
-        decoder_vocab_size = len(tok2idx)
-        dicts = (tok2idx, idx2tok)
-        # append (token, idx) entries which does not appear in source document
-        tok2idx, idx2tok = update_dict(docs, dicts, offset=len(tok2idx))
-        # save the dictionary as pickle
-        with open(dict_file, "wb") as f:
-            dicts = (tok2idx, idx2tok, decoder_vocab_size)
-            pickle.dump(dicts, f)
-    else:
-        tok2idx, idx2tok, decoder_vocab_size = dicts
-    vectorized_docs = map_corpus2idx(docs, tok2idx)
-    vectorized_sums = map_corpus2idx(sums, tok2idx)
-    return vectorized_docs, vectorized_sums, tok2idx, idx2tok, decoder_vocab_size
+    vectorized_docs = map_corpus2idx(docs, vocab)
+    vectorized_sums = map_corpus2idx(sums, vocab)
+    return vectorized_docs, vectorized_sums, vocab
 
 
-def update_dict(sums, dicts, offset):
-    idx = offset
-    tok2idx, idx2tok = dicts
-    for summary in sums:
-        for word in summary:
-            if word not in tok2idx:
-                tok2idx[word] = idx
-                idx2tok[idx] = word
-                idx += 1
-    return tok2idx, idx2tok
-
-
-def load_valid_data(doc_file: str, sum_file: str, tok2idx: dict):
+def load_valid_data(doc_file: str, sum_file: str, vocab: Vocab):
+    # vocab : Vocab object
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
     with open(sum_file, 'r', encoding="utf-8") as sum_file:
         summaries = sum_file.readlines()
     docs = list(map(lambda doc: doc.split(), docs))
     summaries = list(map(lambda summary: summary.split(), summaries))
-    vectorized_docs = map_corpus2idx(docs, tok2idx)
-    vectorized_summaries = map_corpus2idx(summaries, tok2idx)
+    vectorized_docs = map_corpus2idx(docs, vocab)
+    vectorized_summaries = map_corpus2idx(summaries, vocab)
     return vectorized_docs, vectorized_summaries
 
 
-def load_test_data(doc_file: str, tok2idx):
+def load_test_data(doc_file: str, vocab: Vocab):
+    # vocab : Vocab object
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
-    vectorized_docs = map_corpus2idx(docs, tok2idx)
+        docs = list(map(lambda doc : doc.split(), docs))
+    vectorized_docs = map_corpus2idx(docs, vocab)
     return vectorized_docs
 
 
-def map_idx2tok(sentence: str, idx2tok: dict):
+def map_idx2tok(sentence: list, vocab: Vocab):
+    # sentence : list of token indices
     # convert indices in one sentence to corresponding token
-    return list(map(lambda x: idx2tok[x], sentence))
+    return list(map(lambda x: vocab.idx2word(x), sentence))
 
 
-def map_corpus2idx(corpus: list, tok2idx: dict):
+def map_corpus2idx(corpus: list, vocab: Vocab):
     """
     :param corpus: list of document which is composed of tokens
-    :param tok2idx: dictionary which map token to index
+    :param vocab: Vocab object
     :return: list of indices
     """
     vectorized_corpus = []
@@ -141,10 +120,7 @@ def map_corpus2idx(corpus: list, tok2idx: dict):
     for doc in corpus:
         buffer_doc = []
         for word in doc:
-            if word in tok2idx:
-                buffer_doc.append(tok2idx[word.strip()])
-            else:
-                buffer_doc.append(tok2idx[ID_UNK])
+            buffer_doc.append(vocab.word2idx(word.strip()))
         vectorized_corpus.append(buffer_doc)
     return vectorized_corpus
 
@@ -156,7 +132,7 @@ def batch_loader(iterable, batch_size):
         yield iterable[start_idx: min(start_idx + batch_size, length)]
 
 
-def _make_array_format(source, target=None):
+def make_array_format(source, target=None):
     """
 
     :param source: articles to be summarized
@@ -182,10 +158,4 @@ def zero_pad(docs, max_len):
 
 
 if __name__ == "__main__":
-    vectorized_docs, vectorized_sums, tok2idx, idx2tok, decoder_vocab_size = load_data(
-        "article.txt", "summary.txt",
-        "vocab.pickle")
-    print(vectorized_docs)
-    print(vectorized_sums)
-    print(tok2idx)
-    print(idx2tok)
+    vocab = Vocab("data/vocab", 1e10)

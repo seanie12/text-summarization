@@ -3,32 +3,31 @@ from dense_bigru import DenseBiGRU
 import data_util
 import os
 
-learning_rate = 0.5
+max_vocab_size = 15e4
+learning_rate = 0.1
 batch_size = 32
 num_epochs = 200
 dropout = 0.5
 embedding_size = 300
 num_layers = 1
 summary_len = 100
-attention_hidden_size = 100
 beam_depth = 5
 state_size = 120
-# attention_mode = "Luong"
 mode = "train"
-doc_file = "data/cnn-articles.txt"
-sum_file = "data/cnn-summaries.txt"
-vocab_file = "data/vocab.pickle"
-checkpoint_dir = "./save/baseline"
+doc_file = "data/train_article.txt"
+sum_file = "data/train_abstract.txt"
+vocab_file = "data/vocab"
+checkpoint_dir = "./save/baseline/checkpoints"
+checkpoint_prefix = os.path.join(checkpoint_dir, "baseline")
 # load source and target data
-docs, sums, tok2idx, idx2tok, decoder_vocab_size = data_util.load_data(doc_file,
-                                                                       sum_file,
-                                                                       vocab_file,
-                                                                       debug=True)
-vocab_size = len(tok2idx)
+docs, sums, vocab = \
+    data_util.load_data(doc_file, sum_file, vocab_file, max_vocab_size,
+                        debug=True)
+vocab_size = vocab.size()
 # self, vocab_size, embedding_size, state_size, num_layers,
 #                  decoder_vocab_size, attention_hidden_size, mode, beam_depth,
 #                  learning_rate, max_iter=100, attention_mode="Bahdanau"):
-#TODO : load pretrained vector(GLOVE or word2vec), learning rate decay
+# TODO : load pretrained vector(GLOVE or word2vec), learning rate decay
 with tf.Graph().as_default():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -37,8 +36,8 @@ with tf.Graph().as_default():
     log_writer = tf.summary.FileWriter(checkpoint_dir, graph=sess.graph)
     model = DenseBiGRU(vocab_size=vocab_size, embedding_size=embedding_size,
                        num_layers=num_layers, state_size=state_size,
-                       decoder_vocab_size=decoder_vocab_size,
-                       attention_hidden_size=attention_hidden_size, mode=mode,
+                       decoder_vocab_size=vocab_size,
+                       attention_hidden_size=state_size, mode=mode,
                        beam_depth=beam_depth, learning_rate=learning_rate,
                        max_iter=summary_len)
 
@@ -51,13 +50,15 @@ with tf.Graph().as_default():
             os.makedirs(checkpoint_dir)
         print("create new model parameter")
         sess.run(tf.global_variables_initializer())
+    step = None
     for epoch in range(num_epochs):
         batches = data_util.batch_loader(list(zip(docs, sums)), batch_size)
+
         for batch in batches:
             batch_source, batch_target = zip(*batch)
             batch_encoder_input, batch_encoder_len, batch_decoder_input, \
-            batch_decoder_len = data_util._make_array_format(batch_source,
-                                                             batch_target)
+            batch_decoder_len = data_util.make_array_format(batch_source,
+                                                            batch_target)
             batch_loss, summary = model.train(sess,
                                               encoder_inputs=batch_encoder_input,
                                               encoder_length=batch_encoder_len,
@@ -67,7 +68,7 @@ with tf.Graph().as_default():
             step = model.global_step.eval(sess)
             print("epoch : {} step : {}, loss : {}".format(epoch + 1, step,
                                                            batch_loss))
-            if step % 100 == 0:
-                model.save(sess, checkpoint_dir, step)
+
+            model.save(sess, checkpoint_prefix, step)
 
     print("end of training")

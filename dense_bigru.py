@@ -76,10 +76,12 @@ class DenseBiGRU(object):
 
     def build_encoder(self):
         with tf.variable_scope("encoder"):
-            cell_fw_list = [tf.nn.rnn_cell.GRUCell(self.state_size) for _ in
-                            range(self.num_layers)]
-            cell_bw_list = [tf.nn.rnn_cell.GRUCell(self.state_size) for _ in
-                            range(self.num_layers)]
+            cell_fw_list = [tf.nn.rnn_cell.ResidualWrapper(
+                tf.nn.rnn_cell.GRUCell(self.state_size)) for _ in
+                range(self.num_layers)]
+            cell_bw_list = [tf.nn.rnn_cell.ResidualWrapper(
+                tf.nn.rnn_cell.GRUCell(self.state_size)) for _ in
+                range(self.num_layers)]
             # apply dropout during training (double check)
             if self.mode == "train":
                 for i in range(self.num_layers):
@@ -90,9 +92,12 @@ class DenseBiGRU(object):
             cell_fw = tf.nn.rnn_cell.MultiRNNCell(cell_fw_list)
             cell_bw = tf.nn.rnn_cell.MultiRNNCell(cell_bw_list)
             # shared word embedding matrix for encoder and decoder
-
             embedded_encoder_input = tf.nn.embedding_lookup(
                 self.embedding_matrix, self.encoder_input)
+            # for skip connection, make input dimension as same as output
+            input_layer = Dense(self.state_size, dtype=tf.float32,
+                                name="input_projection")
+            embedded_encoder_input = input_layer(embedded_encoder_input)
             ((fw_output, bw_output),
              (fw_state, bw_state)) = tf.nn.bidirectional_dynamic_rnn(cell_fw,
                                                                      cell_bw,
@@ -114,12 +119,15 @@ class DenseBiGRU(object):
             start_tokens = tf.ones([self.batch_size],
                                    dtype=tf.int32) * data_util.ID_GO
             end_token = data_util.ID_EOS
+            input_layer = Dense(self.state_size * 2, dtype=tf.float32,
+                                name="input_layer")
             output_layer = Dense(self.decoder_vocab_size,
                                  name="output_projection")
             if self.mode == "train":
                 # feed ground truth decoder input token every time step
                 decoder_input_lookup = tf.nn.embedding_lookup(
                     self.embedding_matrix, self.decoder_input)
+                decoder_input_lookup = input_layer(decoder_input_lookup)
                 training_helper = seq2seq.TrainingHelper(
                     inputs=decoder_input_lookup,
                     sequence_length=self.decoder_train_len,
@@ -167,8 +175,9 @@ class DenseBiGRU(object):
 
             elif self.mode == "test":
                 def embedding_proj(inputs):
-                    return tf.nn.embedding_lookup(self.embedding_matrix,
-                                                  inputs)
+                    return input_layer(
+                        tf.nn.embedding_lookup(self.embedding_matrix,
+                                               inputs))
 
                 inference_decoder = seq2seq.BeamSearchDecoder(cell=decoder_cell,
                                                               embedding=embedding_proj,
@@ -202,39 +211,48 @@ class DenseBiGRU(object):
     def build_decoder_cell(self):
         encoder_outputs = self.encoder_outputs
         encoder_last_states = self.encoder_last_states
+        encoder_len = self.encoder_len
         # for beam search copy the batch by beam depth times
         if self.mode == "test":
             encoder_outputs = seq2seq.tile_batch(encoder_outputs,
                                                  multiplier=self.beam_depth)
             encoder_last_states = nest.map_structure(
-                lambda s: seq2seq.tile_batch(s, self.beam_depth))
+                lambda s: seq2seq.tile_batch(s, self.beam_depth),
+                encoder_last_states)
             encoder_len = seq2seq.tile_batch(self.encoder_len,
-                                             self.beam_depth)
+                                                  self.beam_depth)
 
         # Bahdanau attention
         self.attention_mechanism = seq2seq.BahdanauAttention(
-            num_units=self.attention_hidden_size,
+            num_units=self.state_size * 2,
             memory=encoder_outputs,
-            memory_sequence_length=self.encoder_len)
+            memory_sequence_length=encoder_len)
         # Luong attention
         if self.attention_mode == "Luong":
             self.attention_mechanism = seq2seq.LuongAttention(
-                num_units=self.attention_hidden_size,
+                num_units=self.state_size * 2,
                 memory=encoder_outputs,
                 memory_sequence_length=encoder_len)
         # instantiate decoder cells (uni-directional multi GRU cell)
-        decoder_cell_list = [tf.nn.rnn_cell.GRUCell(self.state_size * 2) for _
-                             in range(self.num_layers)]
+        decoder_cell_list = [tf.nn.rnn_cell.ResidualWrapper(
+            tf.nn.rnn_cell.GRUCell(self.state_size * 2)) for _
+            in range(self.num_layers)]
         # apply dropout during training
         if self.mode == "train":
             for i in range(self.num_layers):
                 decoder_cell_list[i] = DropoutWrapper(decoder_cell_list[i],
                                                       self.dropout_keep_prob)
 
+        # essential for skip connection
+        def atten_decoder_input_fn(inputs, attention):
+            _input_layer = Dense(self.state_size * 2)
+            return _input_layer(tf.concat([inputs, attention], 1))
+
         # we only apply attention to last layer of encoder
         decoder_cell_list[-1] = seq2seq.AttentionWrapper(decoder_cell_list[-1],
                                                          self.attention_mechanism,
-                                                         self.attention_hidden_size)
+                                                         self.state_size * 2,
+                                                         cell_input_fn=atten_decoder_input_fn)
 
         # To be compatible with AttentionWrapper, the encoder last state
         # of the top layer should be converted into the AttentionWrapperState form
@@ -335,7 +353,6 @@ class DenseBiGRU(object):
 
         output_feed = [self.decoder_pred_test]
         outputs = sess.run(output_feed, input_feed)
-
         # GreedyDecoder: [batch_size, max_time_step]
         # BeamSearchDecoder: [batch_size, max_time_step, beam_width]
         return outputs[0]
@@ -377,7 +394,7 @@ class DenseBiGRU(object):
                     "Decoder targets and their lengths must be equal in their "
                     "batch_size, %d != %d" % (
                         target_batch_size, decoder_inputs_length.shape[0]))
-        input_feed = {}
+        input_feed = dict()
 
         input_feed[self.encoder_input] = encoder_inputs
         input_feed[self.encoder_len] = encoder_inputs_length
