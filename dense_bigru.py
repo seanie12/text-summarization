@@ -168,7 +168,8 @@ class DenseBiGRU(object):
                     gradients = tf.gradients(self.loss, params)
                     clipped_gradients, _ = tf.clip_by_global_norm(gradients,
                                                                   5.0)
-                    opt = tf.train.AdadeltaOptimizer(self.lr)
+                    opt = tf.train.AdadeltaOptimizer(self.lr, epsilon=1e-6)
+
                     self.train_op = opt.apply_gradients(
                         zip(clipped_gradients, params),
                         global_step=self.global_step)
@@ -220,7 +221,7 @@ class DenseBiGRU(object):
                 lambda s: seq2seq.tile_batch(s, self.beam_depth),
                 encoder_last_states)
             encoder_len = seq2seq.tile_batch(self.encoder_len,
-                                                  self.beam_depth)
+                                             self.beam_depth)
 
         # Bahdanau attention
         self.attention_mechanism = seq2seq.BahdanauAttention(
@@ -274,7 +275,7 @@ class DenseBiGRU(object):
             decoder_cell_list), decoder_init_state
 
     def save(self, sess, path, global_step):
-        saver = tf.train.Saver(tf.global_variables())
+        saver = tf.train.Saver(tf.global_variables(), max_to_keep=5)
         save_path = saver.save(sess, path, global_step)
         print("save session to {}".format(save_path))
 

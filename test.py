@@ -3,8 +3,8 @@ import data_util
 import tensorflow as tf
 import os
 
-
-max_vocab_size = 15e4
+max_num_tokens = 900
+max_vocab_size = 500000
 learning_rate = 0.1
 batch_size = 32
 dropout = 0.5
@@ -21,7 +21,7 @@ vocab_file = "data/vocab"
 checkpoint_dir = "./save/baseline/checkpoints"
 checkpoint_prefix = os.path.join(checkpoint_dir, "baseline")
 vocab = data_util.Vocab("data/vocab", max_vocab_size)
-docs = data_util.load_test_data(doc_file, vocab)
+docs = data_util.load_test_data(doc_file, vocab, max_num_tokens)
 summary_file = "result/summaries.txt"
 with tf.Graph().as_default():
     config = tf.ConfigProto()

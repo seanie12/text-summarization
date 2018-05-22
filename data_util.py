@@ -54,7 +54,8 @@ class Vocab(object):
         return self._count
 
 
-def load_data(doc_file, sum_file, vocab_file, max_vocab_size, debug=False):
+def load_data(doc_file, sum_file, vocab_file, max_vocab_size, max_num_tokens,
+              debug=False):
     print("load data")
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
@@ -66,7 +67,7 @@ def load_data(doc_file, sum_file, vocab_file, max_vocab_size, debug=False):
     # check whether the number of documents and summaries are the same
     assert len(docs) == len(sums)
     # split document into word level tokens
-    docs = list(map(lambda doc: doc.split(), docs))
+    docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
     # remove <s> and </s> in summary
     sums = list(
         map(lambda summary:
@@ -80,24 +81,26 @@ def load_data(doc_file, sum_file, vocab_file, max_vocab_size, debug=False):
     return vectorized_docs, vectorized_sums, vocab
 
 
-def load_valid_data(doc_file: str, sum_file: str, vocab: Vocab):
+def load_valid_data(doc_file: str, sum_file: str, vocab: Vocab,
+                    max_num_tokens: int):
     # vocab : Vocab object
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
     with open(sum_file, 'r', encoding="utf-8") as sum_file:
         summaries = sum_file.readlines()
-    docs = list(map(lambda doc: doc.split(), docs))
-    summaries = list(map(lambda summary: summary.split(), summaries))
+    docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
+    summaries = list(
+        map(lambda summary: summary.split(), summaries))
     vectorized_docs = map_corpus2idx(docs, vocab)
     vectorized_summaries = map_corpus2idx(summaries, vocab)
     return vectorized_docs, vectorized_summaries
 
 
-def load_test_data(doc_file: str, vocab: Vocab):
+def load_test_data(doc_file: str, vocab: Vocab, max_num_tokens: int):
     # vocab : Vocab object
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
-        docs = list(map(lambda doc : doc.split(), docs))
+        docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
     vectorized_docs = map_corpus2idx(docs, vocab)
     return vectorized_docs
 
@@ -155,6 +158,23 @@ def zero_pad(docs, max_len):
     padded_docs = list(
         map(lambda doc: doc + [ID_EOS] * (max_len - len(doc)), docs))
     return np.array(padded_docs)
+
+
+def remove_empty(doc_file, sum_file, doc_output, sum_output):
+    docs = open(doc_file, "r", encoding="utf-8").readlines()
+    sums = open(sum_file, "r", encoding="utf-8").readlines()
+    modified_doc = open(doc_output, "w", encoding="utf-8")
+    modified_sum = open(sum_output, "w", encoding="utf-8")
+
+    for i, (doc, abstract) in enumerate(zip(docs, sums)):
+        if doc.strip() == "" or abstract.strip() == "":
+            print("empty string at line {}".format(i))
+            continue
+        modified_doc.write(doc)
+        modified_sum.write(abstract)
+
+    modified_doc.close()
+    modified_sum.close()
 
 
 if __name__ == "__main__":
