@@ -7,15 +7,15 @@ import numpy as np
 
 # configuration
 nepoch_no_improv = 5
-debug = True
+debug = False
 max_vocab_size = 50000
-max_num_tokens = 900
+max_num_tokens = 800
 learning_rate = 0.001
 batch_size = 16
 num_epochs = 40
 dropout = 0.5
 embedding_size = 300
-num_layers = 2
+num_layers = 3
 summary_len = 100
 beam_depth = 4
 state_size = 100
@@ -80,6 +80,7 @@ with tf.Graph().as_default():
             step = model.global_step.eval(sess)
             print("epoch : {} step : {}, loss : {}".format(epoch + 1, step,
                                                            batch_loss))
+        del batches
         losses = []
         for batch in dev_batches:
             source, target = zip(*batch)

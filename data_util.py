@@ -74,8 +74,10 @@ def load_data(doc_file, sum_file, vocab_file, max_vocab_size, max_num_tokens,
             summary.replace("<s>", "").replace("</s>", "").strip(), sums))
     sums = list(map(lambda summary: summary.split(), sums))
     # load saved dictionary
+    data = zip(docs, sums)
     vocab = Vocab(vocab_file, max_vocab_size)
-
+    sorted_data = sorted(data, key=lambda pair: len(pair[0]))
+    docs, sums = zip(*sorted_data)
     vectorized_docs = map_corpus2idx(docs, vocab)
     vectorized_sums = map_corpus2idx(sums, vocab)
     return vectorized_docs, vectorized_sums, vocab
@@ -91,6 +93,11 @@ def load_valid_data(doc_file: str, sum_file: str, vocab: Vocab,
     docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
     summaries = list(
         map(lambda summary: summary.split(), summaries))
+
+    # sort document by the number of tokens for each document
+    data = zip(docs, summaries)
+    sorted_data = sorted(data, key=lambda pair: len(pair[0]))
+    docs, summaries = zip(*sorted_data)
     vectorized_docs = map_corpus2idx(docs, vocab)
     vectorized_summaries = map_corpus2idx(summaries, vocab)
     return vectorized_docs, vectorized_summaries
@@ -101,7 +108,8 @@ def load_test_data(doc_file: str, vocab: Vocab, max_num_tokens: int):
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
         docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
-    vectorized_docs = map_corpus2idx(docs, vocab)
+    sorted_docs = sorted(docs, key=lambda x: len(x))
+    vectorized_docs = map_corpus2idx(sorted_docs, vocab)
     return vectorized_docs
 
 
@@ -118,8 +126,7 @@ def map_corpus2idx(corpus: list, vocab: Vocab):
     :return: list of indices
     """
     vectorized_corpus = []
-    # sort document by the number of tokens for each document
-    corpus = sorted(corpus, key=lambda x: len(x))
+
     for doc in corpus:
         buffer_doc = []
         for word in doc:
