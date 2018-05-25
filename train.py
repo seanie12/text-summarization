@@ -8,7 +8,7 @@ import numpy as np
 # configuration
 nepoch_no_improv = 5
 debug = False
-max_vocab_size = 50000
+max_vocab_size = 5e4
 max_num_tokens = 800
 learning_rate = 0.001
 batch_size = 16
