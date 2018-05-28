@@ -76,6 +76,7 @@ with tf.Graph().as_default():
     pretrained_embedding = load_glove("data/glove.840B.300d.txt", vocab,
                                       embedding_size)
     model.embedding_matrix.assign(pretrained_embedding)
+    del pretrained_embedding
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         print("Reload model paramters")
