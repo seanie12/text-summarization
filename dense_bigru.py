@@ -75,7 +75,7 @@ class DenseBiGRU(object):
                                                 name="dropout")
 
     def build_encoder(self):
-        with tf.variable_scope("encoder"):
+        with tf.variable_scope("encoder") and tf.device("/device:GPU:1"):
             cell_fw_list = [tf.nn.rnn_cell.ResidualWrapper(
                 tf.nn.rnn_cell.GRUCell(self.state_size)) for _ in
                 range(self.num_layers)]
@@ -103,7 +103,8 @@ class DenseBiGRU(object):
                                                                      cell_bw,
                                                                      inputs=embedded_encoder_input,
                                                                      dtype=tf.float32,
-                                                                     sequence_length=self.encoder_len
+                                                                     sequence_length=self.encoder_len,
+                                                                     swap_memory=True
                                                                      )
             # concatenate forward and backward output
             # *_output : [batch_size, max_time_step, state_size ] -> [batch, time_step, state_size *2]
@@ -144,7 +145,7 @@ class DenseBiGRU(object):
                 # decoder_outputs_train.sample_id: [batch_size], tf.int32
                 max_decoder_len = tf.reduce_max(self.decoder_train_len)
                 decoder_outputs_train, final_state, _ = seq2seq.dynamic_decode(
-                    training_decoder, impute_finished=True,
+                    training_decoder, impute_finished=True, swap_memory=True,
                     maximum_iterations=max_decoder_len)
                 self.decoder_logits_train = tf.identity(
                     decoder_outputs_train.rnn_output)
@@ -161,14 +162,15 @@ class DenseBiGRU(object):
                     average_across_timesteps=True)
                 tf.summary.scalar("loss", self.loss)
 
-                with tf.variable_scope("train_optimizer"):
+                with tf.variable_scope("train_optimizer") and tf.device(
+                        "/device:GPU:1"):
                     # use AdamOptimizer and clip gradient by max_norm 5.0
                     # use global step for counting every iteration
                     params = tf.trainable_variables()
                     gradients = tf.gradients(self.loss, params)
                     clipped_gradients, _ = tf.clip_by_global_norm(gradients,
                                                                   5.0)
-                    opt = tf.train.AdadeltaOptimizer(self.lr, epsilon=1e-6)
+                    opt = tf.train.AdagradOptimizer(self.lr)
 
                     self.train_op = opt.apply_gradients(
                         zip(clipped_gradients, params),
@@ -203,11 +205,13 @@ class DenseBiGRU(object):
                 #                                       [max_time_step, batch_size, beam_width] if output_time_major=True
                 # decoder_outputs_decode.beam_search_decoder_output: BeamSearchDecoderOutput instance
                 #                                                    namedtuple(scores, predicted_ids, parent_ids)
-                decoder_outputs, decoder_last_state, decoder_outputs_length = \
-                    seq2seq.dynamic_decode(decoder=inference_decoder,
-                                           output_time_major=False,
-                                           maximum_iterations=self.max_iter)
-                self.decoder_pred_test = decoder_outputs.predicted_ids
+                with tf.device("/device:GPU:1"):
+                    decoder_outputs, decoder_last_state, decoder_output_length = \
+                        seq2seq.dynamic_decode(decoder=inference_decoder,
+                                               output_time_major=False,
+                                               swap_memory=True,
+                                               maximum_iterations=self.max_iter)
+                    self.decoder_pred_test = decoder_outputs.predicted_ids
 
     def build_decoder_cell(self):
         encoder_outputs = self.encoder_outputs

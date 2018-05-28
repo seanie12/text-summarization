@@ -10,7 +10,7 @@ nepoch_no_improv = 5
 debug = False
 max_vocab_size = 5e4
 max_num_tokens = 800
-learning_rate = 0.01
+learning_rate = 0.15
 batch_size = 16
 num_epochs = 40
 dropout = 0.5
@@ -18,7 +18,7 @@ embedding_size = 300
 num_layers = 3
 summary_len = 100
 beam_depth = 4
-state_size = 100
+state_size = 50
 mode = "train"
 doc_file = "data/modified_train_article.txt"
 sum_file = "data/modified_train_abstract.txt"
@@ -33,15 +33,40 @@ docs, sums, vocab = load_data(doc_file, sum_file, vocab_file, max_vocab_size,
 dev_docs, dev_sums = load_valid_data(dev_doc_file, dev_sum_file, vocab,
                                      max_num_tokens)
 vocab_size = vocab.size()
+
 # self, vocab_size, embedding_size, state_size, num_layers,
 #                  decoder_vocab_size, attention_hidden_size, mode, beam_depth,
 #                  learning_rate, max_iter=100, attention_mode="Bahdanau"):
 # TODO : load pretrained vector(GLOVE or word2vec), learning rate decay
+def load_glove(glove_file, vocab, embedding_size):
+    print("load pretrained glove from : {}".format(glove_file))
+    f = open(glove_file, "r", encoding="utf-8")
+    lines = f.readlines()
+    embedding = np.random.uniform(-0.25, 0.25, (vocab_size, embedding_size))
+    for line in lines:
+        tokens = line.strip().split()
+        word = tokens[0]
+        try:
+            vector = np.asarray(tokens[1:embedding_size], dtype=np.float32)
+            index = vocab.word2idx(word)
+            # if unknown word, skip
+            if index == 2:
+                continue
+            embedding[index] = vector
+        except:
+            continue
+    # for PAD token, assign zero vector
+    f.close()
+    embedding[0] = [0.0] * embedding_size
+    return embedding
+
+
 with tf.Graph().as_default():
+    config = tf.ConfigProto(allow_soft_placement=True)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.gpu_options.per_process_gpu_memory_fraction = 0.9
-    sess = tf.Session()
+    sess = tf.Session(config=config)
     log_writer = tf.summary.FileWriter(checkpoint_dir, graph=sess.graph)
     model = DenseBiGRU(vocab_size=vocab_size, embedding_size=embedding_size,
                        num_layers=num_layers, state_size=state_size,
@@ -49,7 +74,9 @@ with tf.Graph().as_default():
                        attention_hidden_size=state_size, mode=mode,
                        beam_depth=beam_depth, learning_rate=learning_rate,
                        max_iter=summary_len)
-
+    pretrained_embedding = load_glove("data/glove.840.B.300d.txt", vocab,
+                                      embedding_size)
+    model.embedding_matrix.assign(pretrained_embedding)
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         print("Reload model paramters")
@@ -86,7 +113,6 @@ with tf.Graph().as_default():
             source, target = zip(*batch)
             encoder_input, encoder_len, decoder_input, \
             decoder_len = make_array_format(source, target)
-            model.mode = "test"
             loss, summary_op = model.eval(sess, encoder_input, encoder_len,
                                           decoder_input, decoder_len)
             losses.append(loss)
@@ -96,7 +122,6 @@ with tf.Graph().as_default():
             print("new record loss : {}".format(result))
             no_improv = 0
             model.save(sess, checkpoint_prefix, step)
-        model.mode = "train"
         no_improv += 1
         if no_improv == nepoch_no_improv:
             print("no improvement for {} epochs".format(no_improv))

@@ -55,7 +55,7 @@ class Vocab(object):
 
 
 def load_data(doc_file, sum_file, vocab_file, max_vocab_size, max_num_tokens,
-              debug=False):
+              debug=False, summary_len=100):
     print("load data")
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
@@ -67,12 +67,12 @@ def load_data(doc_file, sum_file, vocab_file, max_vocab_size, max_num_tokens,
     # check whether the number of documents and summaries are the same
     assert len(docs) == len(sums)
     # split document into word level tokens
-    docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
+    docs = list(map(lambda doc: doc.strip().split()[:max_num_tokens], docs))
     # remove <s> and </s> in summary
     sums = list(
         map(lambda summary:
             summary.replace("<s>", "").replace("</s>", "").strip(), sums))
-    sums = list(map(lambda summary: summary.split(), sums))
+    sums = list(map(lambda summary: summary.split()[:summary_len], sums))
     # load saved dictionary
     data = zip(docs, sums)
     vocab = Vocab(vocab_file, max_vocab_size)
@@ -84,7 +84,7 @@ def load_data(doc_file, sum_file, vocab_file, max_vocab_size, max_num_tokens,
 
 
 def load_valid_data(doc_file: str, sum_file: str, vocab: Vocab,
-                    max_num_tokens: int):
+                    max_num_tokens: int, summary_len=100):
     # vocab : Vocab object
     with open(doc_file, "r", encoding="utf-8") as doc_file:
         docs = doc_file.readlines()
@@ -92,7 +92,11 @@ def load_valid_data(doc_file: str, sum_file: str, vocab: Vocab,
         summaries = sum_file.readlines()
     docs = list(map(lambda doc: doc.split()[:max_num_tokens], docs))
     summaries = list(
-        map(lambda summary: summary.split(), summaries))
+        map(lambda summary: summary.replace("<s>", "").replace("</s>",
+                                                               "").strip(),
+            summaries))
+    summaries = list(
+        map(lambda summary: summary.split()[:summary_len], summaries))
 
     # sort document by the number of tokens for each document
     data = zip(docs, summaries)
@@ -144,7 +148,6 @@ def batch_loader(iterable, batch_size):
 
 def make_array_format(source, target=None):
     """
-
     :param source: articles to be summarized
     :param target: summaries of article
     :return: source,  target (all zero padded)
