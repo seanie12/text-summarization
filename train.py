@@ -63,7 +63,6 @@ def load_glove(glove_file, vocab, embedding_size):
 
 with tf.Graph().as_default():
     config = tf.ConfigProto(allow_soft_placement=True)
-    config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.gpu_options.per_process_gpu_memory_fraction = 0.9
     sess = tf.Session(config=config)
@@ -74,7 +73,7 @@ with tf.Graph().as_default():
                        attention_hidden_size=state_size, mode=mode,
                        beam_depth=beam_depth, learning_rate=learning_rate,
                        max_iter=summary_len)
-    pretrained_embedding = load_glove("data/glove.840.B.300d.txt", vocab,
+    pretrained_embedding = load_glove("data/glove.840B.300d.txt", vocab,
                                       embedding_size)
     model.embedding_matrix.assign(pretrained_embedding)
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
