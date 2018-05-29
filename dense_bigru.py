@@ -170,7 +170,10 @@ class DenseBiGRU(object):
                     gradients = tf.gradients(self.loss, params)
                     clipped_gradients, _ = tf.clip_by_global_norm(gradients,
                                                                   5.0)
-                    opt = tf.train.AdagradOptimizer(self.lr)
+                    learning_rate = tf.train.exponential_decay(self.lr,
+                                                               self.global_step,
+                                                               10000, 0.96)
+                    opt = tf.train.AdagradOptimizer(learning_rate)
 
                     self.train_op = opt.apply_gradients(
                         zip(clipped_gradients, params),

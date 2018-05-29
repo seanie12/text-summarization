@@ -4,7 +4,7 @@ import numpy as np
 MARK_UNK = "<UNK>"
 MARK_EOS = "<EOS>"
 MARK_GO = "<GO>"
-MARKS = [MARK_GO, MARK_EOS, MARK_UNK]
+MARKS = [MARK_EOS, MARK_GO, MARK_UNK]
 ID_EOS = 0
 ID_GO = 1
 ID_UNK = 2

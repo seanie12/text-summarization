@@ -9,7 +9,7 @@ import numpy as np
 nepoch_no_improv = 5
 debug = False
 max_vocab_size = 5e4
-max_num_tokens = 800
+max_num_tokens = 400
 learning_rate = 0.15
 batch_size = 16
 num_epochs = 40
