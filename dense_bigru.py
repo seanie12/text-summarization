@@ -4,6 +4,7 @@ from tensorflow.contrib import seq2seq
 from tensorflow.contrib import layers
 from tensorflow.python.util import nest
 from tensorflow.python.layers.core import Dense
+from attention_decoder import attention_decoder
 import data_util
 
 
@@ -412,3 +413,195 @@ class DenseBiGRU(object):
             input_feed[self.decoder_len] = decoder_inputs_length
 
         return input_feed
+
+
+class HybridSummarizationModel(object):
+    def __init__(self, vocab_size, embedding_size, state_size, num_layers,
+                 mode, beam_depth, learning_rate, max_decode_steps=100):
+        self.vocab_size = vocab_size
+        self.embedding_size = embedding_size
+        self.state_size = state_size
+        self.num_layers = num_layers
+        self.attention_hidden_size = state_size
+        assert mode in ["train, decode"]
+        self.mode = mode
+        self.beam_depth = beam_depth
+        self.lr = learning_rate
+        self.max_decode_steps = max_decode_steps
+
+    def add_placeholder(self):
+        self.encoder_input = tf.placeholder(shape=[None, None], dtype=tf.int32,
+                                            name="encoder_input")
+        self.encoder_len = tf.placeholder(shape=[None], dtype=tf.int32,
+                                          name="encoder_len")
+        encoder_max_len = tf.reduce_max(self.encoder_len)
+        self.encoder_padding_mask = tf.sequence_mask(self.encoder_len,
+                                                     encoder_max_len,
+                                                     dtype=tf.float32)
+        self.decoder_input = tf.placeholder(shape=[None, self.max_decode_steps],
+                                            dtype=tf.int32,
+                                            name="decoder_input")
+        self.target = tf.placeholder(shape=[None, self.max_decode_steps - 1],
+                                     dtype=tf.int32,
+                                     name="decoder_input")
+        self.batch_size = tf.shape(self.encoder_input)[0]
+        decoder_start_token = tf.ones(shape=[self.batch_size, 1],
+                                      dtype=tf.int32,
+                                      name="start_token") * data_util.ID_GO
+        decoder_end_token = tf.ones(shape=[self.batch_size, 1], dtype=tf.int32,
+                                    name="end_token") * data_util.ID_EOS
+        self.decoder_input = tf.concat([decoder_start_token, self.target],
+                                       axis=1)
+        self.decoder_target = tf.concat([self.target, decoder_end_token],
+                                        axis=1)
+        self.decoder_len = tf.placeholder(shape=[None], dtype=tf.int32,
+                                          name="decoder_len")
+
+        decoder_max_len = tf.reduce_max(self.decoder_len)
+        self.decoder_padding_mask = tf.sequence_mask(self.decoder_len,
+                                                     decoder_max_len)
+
+    def _add_encoder(self, encoder_inputs, seq_len):
+        """
+
+        :param encoder_inputs: a tensor shape of
+        [batch_size, max_time_step, embedding_size]
+        :param seq_len: sequence length of each data
+        :return:
+            encoder_outputs
+        """
+        cell_fw = tf.nn.rnn_cell.LSTMCell(self.state_size)
+        cell_bw = tf.nn.rnn_cell.LSTMCell(self.state_size)
+        (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw, cell_bw, encoder_inputs, dtype=tf.float32,
+            sequence_length=seq_len, swap_memory=True)
+        # concat forward and backward state
+        encoder_outputs = tf.concat(encoder_outputs, axis=2)
+        return encoder_outputs, fw_st, bw_st
+
+    def _reduce_states(self, fw_st, bw_st):
+        """
+
+        :param fw_st: lstm tuple forward
+        :param bw_st: lstm tupe backward
+        :return: reduced lstm tuple with state size from state_size *2
+        """
+        with tf.variable_scope("reduce_final_st"):
+            w_reduce_c = tf.get_variable(
+                shape=[self.state_size * 2, self.state_size],
+                initializer=layers.xavier_initializer())
+            w_reduce_h = tf.get_variable(
+                shape=[self.state_size * 2, self.state_size],
+                initializer=layers.xavier_initializer(), name="reduce_h")
+            bias_c = tf.get_variable(shape=[self.state_size],
+                                     initializer=layers.xavier_initializer(),
+                                     name="bias_c")
+            bias_h = tf.get_variable(shape=[self.state_size],
+                                     initializer=layers.xavier_initializer(),
+                                     name="bias_h")
+            # concatenate forward and backward state
+            old_cell_state = tf.concat([fw_st.c, bw_st.c], axis=1)
+            old_hidden_state = tf.concat([fw_st.h, bw_st.h], axis=1)
+
+            new_cell = tf.nn.elu(
+                tf.matmul(old_cell_state, w_reduce_c) + bias_c)
+            new_state = tf.nn.elu(
+                tf.matmul(old_hidden_state, w_reduce_h) + bias_h)
+            return tf.nn.rnn_cell.LSTMStateTuple(new_cell, new_state)
+
+    def _add_decoder(self, decoder_input):
+        """
+
+        :param decoder_input: list of tensor shape [batch, embedding_size]
+        :return:
+            outputs : list of tensor, output of each time step decoder
+            out_state : final state of decoder
+            attn_dists : attention distribution for all time step
+        """
+        # uni-directional LSTM
+        cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
+        # attention_decoder(decoder_inputs, initial_state, encoder_states,
+        #                 encoder_padding_mask, cell, init_state_attention=False)
+        init_attention = self.mode == "decode"
+        outputs, out_state, attn_dists = attention_decoder(decoder_input,
+                                                           self.decoder_init,
+                                                           self.encoder_states,
+                                                           self.encoder_padding_mask,
+                                                           cell, init_attention)
+
+        return outputs, out_state, attn_dists
+
+    def _add_seq2seq(self):
+        with tf.variable_scope("seq2seq"):
+            embedding = tf.get_variable(
+                shape=[self.vocab_size, self.embedding_size],
+                initializer=layers.xavier_initializer(), name="embedding")
+            # [batch_size, max_time_step, embedding_size]
+            encoder_input = tf.nn.embedding_lookup(embedding,
+                                                   self.encoder_input)
+            # list of [batch_size, embedding_size],
+            # length of list is max_decode_step
+            decoder_input = [tf.nn.embedding_lookup(embedding, decoder_batch)
+                             for decoder_batch in
+                             tf.unstack(self.encoder_input, axis=1)]
+            with tf.variable_scope("encoder") and tf.device("/device/GPU:0"):
+                encoder_outputs, fw_st, bw_st = self._add_encoder(encoder_input,
+                                                                  self.encoder_len)
+                self.encoder_states = encoder_outputs
+                self.decoder_init = self._reduce_states(fw_st, bw_st)
+
+            with tf.variable_scope("decoder") and tf.device("device/GPU:1"):
+                decoder_outputs, self.decoder_output_state, \
+                self.attention_dists = self._add_decoder(decoder_input)
+
+            with tf.variable_scope("output_projection"):
+                w_out = tf.get_variable(
+                    shape=[self.state_size, self.vocab_size],
+                    initializer=layers.xavier_initializer(), name="w_out")
+                b_out = tf.get_variable(shape=[self.vocab_size],
+                                        initializer=layers.xavier_initializer(),
+                                        name="b_out")
+                # un-normalized vocab distribution for all time step
+                vocab_scores = []
+                for i, decoder_output in enumerate(decoder_outputs):
+                    if i > 0:
+                        tf.get_variable_scope().reuse_variables()
+                    vocab_scores.append(
+                        tf.matmul(decoder_output, w_out) + b_out)
+
+                vocab_dists = [tf.nn.softmax(score) for score in vocab_scores]
+            if self.mode == "train":
+                with tf.variable_scope("loss"):
+                    # change vocab scores from [max_time_stpe, batch, vocab_size]
+                    # to [batch, max_time_step, vocab_size] using tf.stack
+                    # sequence_loss apply softmax internally
+                    self.loss = tf.contrib.seq2seq.sequence_loss(
+                        tf.stack(vocab_scores, axis=1), self.decoder_target,
+                        self.decoder_padding_mask)
+                    tf.summary.scalar("loss", self.loss)
+            if self.mode == "decode":
+                # when decoding, we run beam search every one time step
+                assert len(vocab_dists) == 1
+                probs = vocab_dists[0]
+                topk_probs, self.topk_ids = tf.nn.top_k(probs,
+                                                        self.beam_depth * 2)
+                self.topk_probs = tf.log(topk_probs)
+
+    def _add_train_op(self):
+        vars = tf.trainable_variables()
+        gradients = tf.gradients(self.loss, vars)
+        clipped_grads, global_norm = tf.clip_by_global_norm(gradients, 5.0)
+
+        optimizer = tf.train.AdagradOptimizer(self.lr)
+        self.train_op = optimizer.apply_gradients(zip(clipped_grads, vars),
+                                                  global_step=self.global_step)
+
+    def build_graph(self):
+        self.add_placeholder()
+        self._add_seq2seq()
+        self.global_step = tf.Variable(tf.constant(0), trainable=False,
+                                       name="global_step")
+        if self.mode == "train":
+            self._add_train_op()
+        self.summaries = tf.summary.merge_all()
+
