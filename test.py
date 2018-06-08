@@ -1,4 +1,4 @@
-from dense_bigru import DenseBiGRU
+from dense_quasi_gru import DenseQuasiGRU
 import data_util
 import tensorflow as tf
 import os
@@ -7,7 +7,9 @@ max_num_tokens = 900
 max_vocab_size = 500000
 learning_rate = 0.1
 batch_size = 32
-dropout = 0.5
+dropout = 1.0
+zoneout = 0.0
+filter_width = 3
 embedding_size = 300
 num_layers = 1
 summary_len = 100
@@ -29,12 +31,15 @@ with tf.Graph().as_default():
     config.gpu_options.per_process_gpu_memory_fraction = 0.9
     sess = tf.Session()
     log_writer = tf.summary.FileWriter(checkpoint_dir, graph=sess.graph)
-    model = DenseBiGRU(vocab_size=max_vocab_size, embedding_size=embedding_size,
-                       num_layers=num_layers, state_size=state_size,
-                       decoder_vocab_size=max_vocab_size,
-                       attention_hidden_size=attention_hidden_size, mode=mode,
-                       beam_depth=beam_depth, learning_rate=learning_rate,
-                       max_iter=summary_len)
+    model = DenseQuasiGRU(vocab_size=max_vocab_size,
+                          embedding_size=embedding_size,
+                          num_layers=num_layers, state_size=state_size,
+                          decoder_vocab_size=max_vocab_size,
+                          filter_width=filter_width, zoneout=zoneout,
+                          attention_hidden_size=attention_hidden_size,
+                          mode=mode,
+                          beam_depth=beam_depth, learning_rate=learning_rate,
+                          max_iter=summary_len)
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         print("Reload model parameters")
