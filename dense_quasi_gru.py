@@ -98,7 +98,7 @@ class DenseQuasiGRU(object):
                                   sequence_lengths=self.encoder_len,
                                   pool_type="ifo", zoneout=self.zoneout,
                                   infer=self.train == "test",
-                                  name="QRNN_{}".format(i))
+                                  name="QRNN_{}".format(i), mask=False)
                 qrnn_hidden, state = qrnn(curr_input)
                 qrnn_hidden = tf.nn.dropout(qrnn_hidden, self.dropout_keep_prob)
                 self.encoder_last_states.append(state)

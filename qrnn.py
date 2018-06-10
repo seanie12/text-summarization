@@ -88,12 +88,14 @@ class QRNN_pooling(tf.nn.rnn_cell.RNNCell):
                 # extract Z activations and F gate activations
                 Z, F = tf.split(value=inputs, axis=1, num_or_size_splits=2)
                 # return the dynamic average pooling
-                output = tf.multiply(F, state) + tf.multiply(tf.subtract(1., F), Z)
+                output = tf.multiply(F, state) + tf.multiply(tf.subtract(1., F),
+                                                             Z)
                 return output, output
             elif pool_type == 'fo':
                 # extract Z, F gate and O gate
                 Z, F, O = tf.split(value=inputs, axis=1, num_or_size_splits=3)
-                new_state = tf.multiply(F, state) + tf.multiply(tf.subtract(1., F), Z)
+                new_state = tf.multiply(F, state) + tf.multiply(
+                    tf.subtract(1., F), Z)
                 output = tf.multiply(O, new_state)
                 return output, new_state
             elif pool_type == 'ifo':
@@ -114,7 +116,7 @@ class QRNN_layer(object):
 
     def __init__(self, out_fmaps, sequence_lengths=None, fwidth=2,
                  activation=tf.tanh, pool_type='fo', zoneout=0.1, infer=False,
-                 bias_init_val=None,
+                 bias_init_val=None, mask=True,
                  name='QRNN'):
         """
         pool_type: can be f, fo, or ifo
@@ -131,6 +133,7 @@ class QRNN_layer(object):
         self.out_fmaps = out_fmaps
         self.zoneout = zoneout
         self.bias_init_val = bias_init_val
+        self.mask = mask
 
     def __call__(self, input_):
         input_shape = input_.get_shape().as_list()
@@ -143,7 +146,7 @@ class QRNN_layer(object):
             # gates: list containing gate activations (num of gates depending
             # on pool_type)
             Z, gates = self.convolution(input_, fwidth, out_fmaps, pool_type,
-                                        zoneout)
+                                        zoneout, mask)
             # join all features (Z and gates) into Tensor at dim 2 merged
             T = tf.concat([Z] + gates, axis=2)
             # create the pooling layer
@@ -156,7 +159,8 @@ class QRNN_layer(object):
             self.Z = Z
             return H, last_C
 
-    def convolution(self, input_, filter_width, out_fmaps, pool_type, zoneout_):
+    def convolution(self, input_, filter_width, out_fmaps, pool_type, zoneout_,
+                    mask):
         """ Applies 1D convolution along time-dimension (T) assuming input
             tensor of dim (batch_size, T, n) and returns
             (batch_size, T, out_fmaps)
@@ -167,7 +171,10 @@ class QRNN_layer(object):
         num_gates = len(pool_type)
         gates = []
         # pad on the left to mask the convolution (make it causal)
-        pinput = tf.pad(input_, [[0, 0], [filter_width - 1, 0], [0, 0]])
+        if mask:
+            pinput = tf.pad(input_, [[0, 0], [filter_width - 1, 0], [0, 0]])
+        else:
+            pinput = input_
         with tf.variable_scope('convolutions'):
             Wz = tf.get_variable('Wz', [filter_width, in_fmaps, out_fmaps],
                                  initializer=tf.random_uniform_initializer(
