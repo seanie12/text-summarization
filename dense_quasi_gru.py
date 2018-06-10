@@ -106,7 +106,8 @@ class DenseQuasiGRU(object):
                 if i < self.num_layers - 1:
                     curr_input = tf.concat([curr_input, qrnn_hidden], axis=2)
                 else:
-                    self.encoder_outputs = qrnn_hidden
+                    self.encoder_outputs = tf.concat([curr_input, qrnn_hidden],
+                                                     axis=2)
             # concatenate forward and backward output
             # qrnn_hidden : [batch_size, max_time_step, state_size ]
             # encoder_last_states : [num_layers, batch_size, state_size ]

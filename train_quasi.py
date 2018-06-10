@@ -1,5 +1,5 @@
 import tensorflow as tf
-from dense_bigru import DenseBiGRU
+from dense_quasi_gru import DenseQuasiGRU
 from data_util import batch_loader, load_data, load_valid_data, \
     make_array_format
 import os
@@ -14,8 +14,10 @@ learning_rate = 0.15
 batch_size = 16
 num_epochs = 40
 dropout = 0.5
+zoneout = 0.1
+filter_width = 3
 embedding_size = 300
-num_layers = 1
+num_layers = 3
 summary_len = 100
 beam_depth = 4
 state_size = 50
@@ -23,7 +25,7 @@ mode = "train"
 doc_file = "data/modified_train_article.txt"
 sum_file = "data/modified_train_abstract.txt"
 vocab_file = "data/vocab"
-checkpoint_dir = "./save/baseline/checkpoints"
+checkpoint_dir = "./save/quasi/checkpoints"
 checkpoint_prefix = os.path.join(checkpoint_dir, "baseline")
 dev_doc_file = "data/val_article.txt"
 dev_sum_file = "data/val_abstract.txt"
@@ -34,10 +36,10 @@ dev_docs, dev_sums = load_valid_data(dev_doc_file, dev_sum_file, vocab,
                                      max_num_tokens)
 vocab_size = vocab.size()
 
+
 # self, vocab_size, embedding_size, state_size, num_layers,
 #                  decoder_vocab_size, attention_hidden_size, mode, beam_depth,
 #                  learning_rate, max_iter=100, attention_mode="Bahdanau"):
-# TODO : load pretrained vector(GLOVE or word2vec), learning rate decay
 def load_glove(glove_file, vocab, embedding_size):
     print("load pretrained glove from : {}".format(glove_file))
     f = open(glove_file, "r", encoding="utf-8")
@@ -67,12 +69,13 @@ with tf.Graph().as_default():
     config.gpu_options.per_process_gpu_memory_fraction = 0.9
     sess = tf.Session(config=config)
     log_writer = tf.summary.FileWriter(checkpoint_dir, graph=sess.graph)
-    model = DenseBiGRU(vocab_size=vocab_size, embedding_size=embedding_size,
-                       num_layers=num_layers, state_size=state_size,
-                       decoder_vocab_size=vocab_size,
-                       attention_hidden_size=state_size, mode=mode,
-                       beam_depth=beam_depth, learning_rate=learning_rate,
-                       max_iter=summary_len)
+    model = DenseQuasiGRU(vocab_size=vocab_size, embedding_size=embedding_size,
+                          num_layers=num_layers, state_size=state_size,
+                          filter_width=filter_width, zoneout=zoneout,
+                          decoder_vocab_size=vocab_size,
+                          attention_hidden_size=state_size, mode=mode,
+                          beam_depth=beam_depth, learning_rate=learning_rate,
+                          max_iter=summary_len)
     pretrained_embedding = load_glove("data/glove.840B.300d.txt", vocab,
                                       embedding_size)
     model.embedding_matrix.assign(pretrained_embedding)
