@@ -7,7 +7,7 @@ import numpy as np
 
 # configuration
 nepoch_no_improv = 5
-debug = False
+debug = True
 max_vocab_size = 5e4
 max_num_tokens = 400
 learning_rate = 0.15
@@ -17,7 +17,7 @@ dropout = 0.5
 zoneout = 0.1
 filter_width = 3
 embedding_size = 300
-num_layers = 3
+num_layers = 1
 summary_len = 100
 beam_depth = 4
 state_size = 50
@@ -33,7 +33,7 @@ dev_sum_file = "data/val_abstract.txt"
 docs, sums, vocab = load_data(doc_file, sum_file, vocab_file, max_vocab_size,
                               debug=debug, max_num_tokens=max_num_tokens)
 dev_docs, dev_sums = load_valid_data(dev_doc_file, dev_sum_file, vocab,
-                                     max_num_tokens)
+                                     max_num_tokens, debug=debug)
 vocab_size = vocab.size()
 
 
@@ -76,10 +76,11 @@ with tf.Graph().as_default():
                           attention_hidden_size=state_size, mode=mode,
                           beam_depth=beam_depth, learning_rate=learning_rate,
                           max_iter=summary_len)
-    pretrained_embedding = load_glove("data/glove.840B.300d.txt", vocab,
-                                      embedding_size)
-    model.embedding_matrix.assign(pretrained_embedding)
-    del pretrained_embedding
+    if not debug:
+        pretrained_embedding = load_glove("data/glove.840B.300d.txt", vocab,
+                                          embedding_size)
+        model.embedding_matrix.assign(pretrained_embedding)
+        del pretrained_embedding
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         print("Reload model paramters")
